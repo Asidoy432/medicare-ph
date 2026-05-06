@@ -18,7 +18,7 @@ RULES:
 - Prices shown are per unit (tablet/capsule/etc.) unless stated otherwise
 
 DELIVERY INFO:
-- Same-day delivery in Metro Manila for orders before 2 PM
+- Same-day delivery in Lemery Iloilo for orders before 2 PM
 - Next-day delivery for provincial areas
 - FREE delivery on orders above PHP 999
 
