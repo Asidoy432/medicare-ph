@@ -36,11 +36,7 @@ You are now ready to assist customers. Please respond as MediBot to everything t
 
 // Free models to try in order — falls back if one is unavailable
 const FREE_MODELS = [
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "mistralai/mistral-7b-instruct:free",
-  "qwen/qwen-2-7b-instruct:free",
-  "google/gemma-2-9b-it:free",
-  "deepseek/deepseek-r1:free",
+  "openai/gpt-oss-120b:free",
 ];
 
 async function tryModel(model, fullMessages, apiKey, referer) {
