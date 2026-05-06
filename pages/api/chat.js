@@ -1,32 +1,86 @@
 import { getCatalogSummary } from "../../data/products";
 
-const SYSTEM_PROMPT = `You are MediBot, the friendly and knowledgeable AI pharmacy assistant for MediCare PH — a trusted FDA-registered online pharmacy in the Philippines.
+// Injected as a user+assistant pair — works with ALL free models
+// (many open-source models ignore the "system" role entirely)
+function buildSystemTurn() {
+  return [
+    {
+      role: "user",
+      content: `You are MediBot, the friendly AI pharmacy assistant for MediCare PH — a trusted FDA-registered online pharmacy in the Philippines.
 
-Your role:
-- Help customers find the right medicines and health products
-- Provide clear, accurate drug information (generic names, uses, dosage guidelines)
-- Explain differences between branded and generic medicines
-- Advise on OTC vs prescription (RX) requirements
-- Give general health tips relevant to Filipino customers
-- Help with order and delivery questions
-- Flag when professional medical consultation is needed
+RULES:
+- Answer questions about medicines, vitamins, dosage, and health products
+- Always note that RX medicines require a valid prescription
+- Never diagnose — always tell users to consult a doctor for diagnosis
+- Be warm and use Filipino-friendly language occasionally (e.g. "po", "Ingat!")
+- Keep replies concise (2-4 sentences) unless more detail is needed
+- For serious symptoms say: "Please consult your doctor or go to the nearest hospital po"
+- Prices shown are per unit (tablet/capsule/etc.) unless stated otherwise
 
-Rules:
-- Always remind customers that RX (prescription) medicines require a valid prescription
-- Never diagnose conditions — recommend consulting a doctor for diagnosis
-- Mention that prices shown are per unit (per tablet/capsule/etc.) unless stated otherwise
-- Be warm, helpful, and conversational — use Filipino-friendly language occasionally (e.g., "po", "Ingat!")
-- Keep responses concise (2-4 sentences usually) unless detailed info is needed
-- For serious symptoms, always say "Please consult your doctor or go to the nearest hospital"
-
-Delivery info:
-- Same-day delivery in Metro Manila for orders placed before 2 PM
+DELIVERY INFO:
+- Same-day delivery in Metro Manila for orders before 2 PM
 - Next-day delivery for provincial areas
-- Free delivery on orders above ₱999
+- FREE delivery on orders above PHP 999
 
-Here is the current product catalog:
+CURRENT PRODUCT CATALOG:
+${getCatalogSummary()}
 
-${getCatalogSummary()}`;
+You are now ready to assist customers. Please respond as MediBot to everything the customer says.`,
+    },
+    {
+      role: "assistant",
+      content: "Understood po! I am MediBot, your MediCare PH pharmacy assistant. I am ready to help customers with medicine questions, product recommendations, and health information. How can I help?",
+    },
+  ];
+}
+
+// Free models to try in order — falls back if one is unavailable
+const FREE_MODELS = [
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "mistralai/mistral-7b-instruct:free",
+  "qwen/qwen-2-7b-instruct:free",
+  "google/gemma-2-9b-it:free",
+  "deepseek/deepseek-r1:free",
+];
+
+async function tryModel(model, fullMessages, apiKey, referer) {
+  let response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": referer,
+        "X-Title": "MediCare PH",
+      },
+      body: JSON.stringify({
+        model,
+        messages: fullMessages,
+        max_tokens: 400,
+        temperature: 0.7,
+      }),
+    });
+  } catch (e) {
+    console.warn("Network error for model", model, e.message);
+    return null;
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    return null;
+  }
+
+  if (data.error) {
+    console.warn("Model error for", model, JSON.stringify(data.error));
+    return null;
+  }
+
+  const content = data.choices?.[0]?.message?.content;
+  return content ? { reply: content, model } : null;
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -37,42 +91,39 @@ export default async function handler(req, res) {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
-    return res.status(500).json({ error: "OPENROUTER_API_KEY is not set in environment variables. Please add it to your .env.local file or Vercel environment settings." });
+    return res.status(500).json({
+      error:
+        "OPENROUTER_API_KEY is not set. " +
+        "Go to Vercel > your project > Settings > Environment Variables, " +
+        "add OPENROUTER_API_KEY with your key from openrouter.ai/keys, then Redeploy.",
+    });
   }
 
-  if (!messages || !Array.isArray(messages)) {
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: "messages array is required" });
   }
 
-  try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://medicare-ph.vercel.app",
-        "X-Title": "MediCare PH",
-      },
-      body: JSON.stringify({
-        model: "deepseek/deepseek-r1:free",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...messages,
-        ],
-        max_tokens: 500,
-        temperature: 0.7,
-      }),
-    });
+  // Build full conversation: system context + real chat history
+  const systemTurns = buildSystemTurn();
+  const fullMessages = [...systemTurns, ...messages];
 
-    const data = await response.json();
+  // Use actual Vercel URL for the HTTP-Referer header
+  const referer = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000";
 
-    if (data.error) {
-      return res.status(502).json({ error: data.error.message || JSON.stringify(data.error) });
+  // Try each model in order until one responds
+  for (const model of FREE_MODELS) {
+    const result = await tryModel(model, fullMessages, apiKey, referer);
+    if (result) {
+      return res.status(200).json(result);
     }
-
-    const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't get a response. Please try again.";
-    return res.status(200).json({ reply });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
   }
+
+  // All models failed
+  return res.status(502).json({
+    error:
+      "All free AI models are currently busy. Please try again in a moment. " +
+      "If this keeps happening, verify your OPENROUTER_API_KEY at openrouter.ai/keys is valid.",
+  });
 }
