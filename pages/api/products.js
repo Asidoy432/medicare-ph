@@ -33,7 +33,7 @@ export default async function handler(req, res) {
       stock: parseInt(stock) || 100,
       rx: rx === true || rx === "true",
       emoji: emoji || "💊",
-      desc: desc || "",
+      description: desc || "",
       rating: parseFloat(rating) || 4.5,
       reviews: parseInt(reviews) || 0,
       badge: badge || null,
